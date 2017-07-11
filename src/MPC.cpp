@@ -1,13 +1,13 @@
 #include "MPC.h"
+#include "Eigen-3.3/Eigen/Core"
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
-#include "Eigen-3.3/Eigen/Core"
 
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 0;
-double dt = 0;
+size_t N = 20;
+double dt = 0.2;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -22,17 +22,18 @@ double dt = 0;
 const double Lf = 2.67;
 
 class FG_eval {
- public:
+public:
+  using ADvector = CPPAD_TESTVECTOR(AD<double>);
+
   // Fitted polynomial coefficients
   Eigen::VectorXd coeffs;
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
 
-  typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
-  void operator()(ADvector& fg, const ADvector& vars) {
+  void operator()(ADvector &fg, const ADvector &vars) {
     // TODO: implement MPC
-    // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
-    // NOTE: You'll probably go back and forth between this function and
-    // the Solver function below.
+    // `fg` a vector of the cost constraints, `vars` is a vector of variable
+    // values (state & actuators) NOTE: You'll probably go back and forth
+    // between this function and the Solver function below.
   }
 };
 
@@ -43,9 +44,10 @@ MPC::MPC() {}
 MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
+  using  Dvector = CPPAD_TESTVECTOR(double);
   bool ok = true;
-  size_t i;
-  typedef CPPAD_TESTVECTOR(double) Dvector;
+
+  size_t i = 0;
 
   // TODO: Set the number of model variables (includes both states and inputs).
   // For example: If the state is a 4 element vector, the actuators is a 2
