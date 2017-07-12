@@ -5,36 +5,41 @@
 
 using CppAD::AD;
 
-// TODO: Set the timestep length and duration
-size_t N = 20;
-double dt = 0.2;
+enum McpStateIndex : size_t {
+  kStateX = 0,
+  kStateY = 1,
+  kStatePsi = 2,
+  kStateVel = 3,
+  kStateCte = 4,
+  kStateEpsi = 5,
+  kStateSize = 6
+};
 
-// This value assumes the model presented in the classroom is used.
-//
-// It was obtained by measuring the radius formed by running the vehicle in the
-// simulator around in a circle with a constant steering angle and velocity on a
-// flat terrain.
-//
-// Lf was tuned until the the radius formed by the simulating the model
-// presented in the classroom matched the previous radius.
-//
-// This is the length from front to CoG that has a similar radius.
-const double Lf = 2.67;
+enum VarIndex : size_t {
+  kVarX = kStateX * MPC::n,
+  kVarY = kStateY * MPC::n,
+  kVarPsi = kStatePsi * MPC::n,
+  kVarVel = kStateVel * MPC::n,
+  kVarCte = kStateCte * MPC::n,
+  kVarEpsi = kStateEpsi * MPC::n,
+  kVarDelta = kStateSize * MPC::n,
+  kVarAcc = (kStateSize + 1) * MPC::n - 1,
+  kVarSize = kStateSize * MPC::n + (MPC::n - 1) * 2
+};
 
-class FG_eval {
+class MpcEval {
 public:
   using ADvector = CPPAD_TESTVECTOR(AD<double>);
 
-  // Fitted polynomial coefficients
-  Eigen::VectorXd coeffs;
-  FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
+  MpcEval(const Eigen::VectorXd &coeffs) { coeffs_ = coeffs; }
 
   void operator()(ADvector &fg, const ADvector &vars) {
-    // TODO: implement MPC
-    // `fg` a vector of the cost constraints, `vars` is a vector of variable
-    // values (state & actuators) NOTE: You'll probably go back and forth
-    // between this function and the Solver function below.
+    // TODO: !!!
   }
+
+private:
+  // Fitted polynomial coefficients
+  Eigen::VectorXd coeffs_;
 };
 
 //
@@ -44,68 +49,71 @@ MPC::MPC() {}
 MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
-  using  Dvector = CPPAD_TESTVECTOR(double);
+  using Dvector = CPPAD_TESTVECTOR(double);
+
   bool ok = true;
 
-  size_t i = 0;
+  const auto x = state[kStateX];
+  const auto y = state[kStateY];
+  const auto psi = state[kStatePsi];
+  const auto vel = state[kStateVel];
+  const auto cte = state[kStateCte];
+  const auto epsi = state[kStateEpsi];
 
-  // TODO: Set the number of model variables (includes both states and inputs).
-  // For example: If the state is a 4 element vector, the actuators is a 2
-  // element vector and there are 10 timesteps. The number of variables is:
-  //
-  // 4 * 10 + 2 * 9
-  size_t n_vars = 0;
-  // TODO: Set the number of constraints
-  size_t n_constraints = 0;
+  const auto n_constraints = kStateSize * n;
 
-  // Initial value of the independent variables.
-  // SHOULD BE 0 besides initial state.
-  Dvector vars(n_vars);
-  for (int i = 0; i < n_vars; i++) {
+  Dvector vars(kVarSize);
+
+  // Lower and Upper Boundaries
+  Dvector vars_low(kVarSize);
+  Dvector vars_up(kVarSize);
+  Dvector constraints_low(n_constraints);
+  Dvector constraints_up(n_constraints);
+
+  for (auto i = 0; i < kVarSize; i++) {
     vars[i] = 0;
   }
 
-  Dvector vars_lowerbound(n_vars);
-  Dvector vars_upperbound(n_vars);
-  // TODO: Set lower and upper limits for variables.
-
-  // Lower and upper limits for the constraints
-  // Should be 0 besides initial state.
-  Dvector constraints_lowerbound(n_constraints);
-  Dvector constraints_upperbound(n_constraints);
-  for (int i = 0; i < n_constraints; i++) {
-    constraints_lowerbound[i] = 0;
-    constraints_upperbound[i] = 0;
+  for (size_t i = kVarX; i < kVarDelta; ++i) {
+    vars_low[i] = -var_bound;
+    vars_up[i] = var_bound;
   }
 
-  // object that computes objective and constraints
-  FG_eval fg_eval(coeffs);
+  for (size_t i = kVarDelta; i < kVarAcc; ++i) {
+    vars_low[i] = -delta_bound;
+    vars_up[i] = delta_bound;
+  }
 
-  //
-  // NOTE: You don't have to worry about these options
-  //
-  // options for IPOPT solver
+  for (size_t i = kVarAcc; i < kVarSize; ++i) {
+    vars_low[i] = -acc_bound;
+    vars_up[i] = acc_bound;
+  }
+
+  for (int i = 0; i < n_constraints; i++) {
+    constraints_low[i] = 0;
+    constraints_up[i] = 0;
+  }
+
+  constraints_up[kVarX] = constraints_low[kVarX] = x;
+  constraints_up[kVarY] = constraints_low[kVarY] = y;
+  constraints_up[kVarPsi] = constraints_low[kVarPsi] = psi;
+  constraints_up[kVarVel] = constraints_low[kVarVel] = vel;
+  constraints_up[kVarCte] = constraints_low[kVarCte] = cte;
+  constraints_up[kVarEpsi] = constraints_low[kVarEpsi] = epsi;
+
+  // object that computes objective and constraints
+  MpcEval mcp_eval(coeffs);
+
   std::string options;
-  // Uncomment this if you'd like more print information
   options += "Integer print_level  0\n";
-  // NOTE: Setting sparse to true allows the solver to take advantage
-  // of sparse routines, this makes the computation MUCH FASTER. If you
-  // can uncomment 1 of these and see if it makes a difference or not but
-  // if you uncomment both the computation time should go up in orders of
-  // magnitude.
   options += "Sparse  true        forward\n";
   options += "Sparse  true        reverse\n";
-  // NOTE: Currently the solver has a maximum time limit of 0.5 seconds.
-  // Change this as you see fit.
   options += "Numeric max_cpu_time          0.5\n";
 
-  // place to return solution
   CppAD::ipopt::solve_result<Dvector> solution;
-
-  // solve the problem
-  CppAD::ipopt::solve<Dvector, FG_eval>(
-      options, vars, vars_lowerbound, vars_upperbound, constraints_lowerbound,
-      constraints_upperbound, fg_eval, solution);
+  CppAD::ipopt::solve<Dvector, MpcEval>(options, vars, vars_low, vars_up,
+                                        constraints_low, constraints_up,
+                                        mcp_eval, solution);
 
   // Check some of the solution values
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
