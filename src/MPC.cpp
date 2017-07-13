@@ -3,8 +3,9 @@
  * Authour: Artem Artemev, @artemav
  */
 
-#include "MPC.h"
+#include "mpc.h"
 #include "Eigen-3.3/Eigen/Core"
+#include "aux.h"
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
 
@@ -12,24 +13,21 @@ namespace mpc {
 
 using CppAD::AD;
 
-static constexpr double dt = 0.8;
-static constexpr double lf = 2.67;
-
-static constexpr double vel_ref = 50.0;
+static constexpr double vel_ref = 75.0;
 static constexpr double cte_ref = 0.0;
 static constexpr double epsi_ref = 0.0;
 
-static constexpr double var_bound = 1.0e19;
+static constexpr double var_bound = 1.0e6;
 static constexpr double delta_bound = rad25;
 static constexpr double acc_bound = 1.0;
 
-static constexpr double delta_weight = 1.0;
-static constexpr double cte_weight = 1.0;
-static constexpr double acc_weight = 1.0;
-static constexpr double vel_weight = 1.0;
-static constexpr double epsi_weight = 1.0;
-static constexpr double diff_delta_weight = 1.0;
-static constexpr double diff_acc_weight = 1.0;
+static constexpr double delta_weight = 1000.0;
+static constexpr double cte_weight = 9.0;
+static constexpr double acc_weight = 20;
+static constexpr double vel_weight = 0.5;
+static constexpr double epsi_weight = 0.5;
+static constexpr double diff_delta_weight = 0.1;
+static constexpr double diff_acc_weight = 0.001;
 
 class MpcEval {
 public:
@@ -97,7 +95,7 @@ public:
 
       AD<double> psides0 = 0.0;
       for (int i = 1; i < coeffs_.size(); i++) {
-        psides0 += i * coeffs_[i] * CppAD::pow(x0, i - 1); // f'(x0)
+        psides0 += i * coeffs_[i] * CppAD::pow(x0, i - 1);
       }
 
       psides0 = CppAD::atan(psides0);
@@ -119,7 +117,11 @@ private:
 //
 // MPC class definition implementation.
 //
-MPC::MPC() {}
+MPC::MPC() {
+  state_ = std::vector<double>(kStateInternalSize);
+  x_coord_ = std::vector<double>(num_);
+}
+
 MPC::~MPC() {}
 
 void MPC::Solve(const Eigen::VectorXd &state, const Eigen::VectorXd &coeffs) {
@@ -187,27 +189,36 @@ void MPC::Solve(const Eigen::VectorXd &state, const Eigen::VectorXd &coeffs) {
                                         constraints_low, constraints_up,
                                         mcp_eval, solution);
 
+
+  AUX_DEBUG("Cost: ", solution.obj_value);
+  AUX_DEBUG("Status: ", solution.status);
+  AUX_DEBUG("Success index: ", CppAD::ipopt::solve_result<Dvector>::success);
+  AUX_DEBUG("Solution size: ", solution.x.size());
+
   // Check some of the solution values
-  if (solution.status == CppAD::ipopt::solve_result<Dvector>::success) {
-    std::cerr << "Solution status is not successful\n";
+  if (solution.status != CppAD::ipopt::solve_result<Dvector>::success) {
+    AUX_DEBUG("Solution status is not successful\n");
     return;
   }
 
-#ifdef NDEBUG
-  std::cout << "Cost " << solution.obj_value << std::endl;
-#endif
-
   state_[kStateX] = solution.x[kStateX];
+  AUX_DEBUG("1");
   state_[kStateY] = solution.x[kStateY];
+  AUX_DEBUG("2");
   state_[kStatePsi] = solution.x[kStatePsi];
+  AUX_DEBUG("3");
   state_[kStateVel] = solution.x[kStateVel];
+  AUX_DEBUG("4");
   state_[kStateCte] = solution.x[kStateCte];
+  AUX_DEBUG("5");
   state_[kStateEpsi] = solution.x[kStateEpsi];
+  AUX_DEBUG("6");
 
   for (int i = 0; i < num_pred; ++i) {
     x_coord_[i] = solution.x[kStateX + i];
     y_coord_[i] = solution.x[kStateY + i];
   }
+  AUX_DEBUG("7");
 }
 
 } /* namespace mpc */

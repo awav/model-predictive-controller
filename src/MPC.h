@@ -14,6 +14,9 @@ namespace mpc {
 static constexpr size_t num_pred = 20;
 static constexpr double rad25 = 0.436332313;
 
+static constexpr double dt = 0.1;
+static constexpr double lf = 2.67;
+
 class MPC {
 public:
   MPC();
@@ -23,17 +26,9 @@ public:
   // Return the first actuatotions.
   void Solve(const Eigen::VectorXd &state, const Eigen::VectorXd &coeffs);
 
-  const std::vector<double> &State() const {
-    return state_;
-  };
-
-  const std::vector<double> &XCoord() const {
-    return x_coord_;
-  };
-
-  const std::vector<double> &YCoord() const {
-    return y_coord_;
-  };
+  const std::vector<double> &State() const { return state_; };
+  const std::vector<double> &XCoord() const { return x_coord_; };
+  const std::vector<double> &YCoord() const { return y_coord_; };
 
 private:
   std::vector<double> state_;

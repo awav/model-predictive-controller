@@ -1,7 +1,8 @@
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
-#include "MPC.h"
 #include "json.hpp"
+#include "mpc.h"
+#include "aux.h"
 
 #include <chrono>
 #include <iostream>
@@ -21,20 +22,20 @@ double rad2deg(double x) { return x * 180 / pi(); }
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
 // else the empty string "" will be returned.
-string hasData(string s) {
+std::string hasData(std::string s) {
   auto found_null = s.find("null");
   auto b1 = s.find_first_of("[");
   auto b2 = s.rfind("}]");
-  if (found_null != string::npos) {
+  if (found_null != std::string::npos) {
     return "";
-  } else if (b1 != string::npos && b2 != string::npos) {
+  } else if (b1 != std::string::npos && b2 != std::string::npos) {
     return s.substr(b1, b2 - b1 + 2);
   }
   return "";
 }
 
 // Evaluate a polynomial.
-double polyeval(Eigen::VectorXd coeffs, double x) {
+double polyeval(const Eigen::VectorXd &coeffs, double x) {
   double result = 0.0;
   for (int i = 0; i < coeffs.size(); i++) {
     result += coeffs[i] * pow(x, i);
@@ -45,8 +46,8 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
+Eigen::VectorXd polyfit(const Eigen::VectorXd xvals,
+                        const Eigen::VectorXd &yvals, int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -64,6 +65,11 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   auto Q = A.householderQr();
   auto result = Q.solve(yvals);
   return result;
+}
+
+template <typename Out = double, typename Json = json::basic_json>
+Out json_data_get(const Json &j, const std::string &key) {
+  return j[1][key];
 }
 
 int main() {
@@ -85,13 +91,51 @@ int main() {
         auto j = json::parse(s);
         std::string event = j[0].get<std::string>();
         if (event == "telemetry") {
-          // j[1] is the data JSON object
-          std::vector<double> ptsx = j[1]["ptsx"];
-          std::vector<double> ptsy = j[1]["ptsy"];
-          double px = j[1]["x"];
-          double py = j[1]["y"];
-          double psi = j[1]["psi"];
-          double v = j[1]["speed"];
+          const auto &wx = json_data_get<std::vector<double>>(j, "ptsx");
+          const auto &wy = json_data_get<std::vector<double>>(j, "ptsy");
+          assert(wx.size() == wy.size());
+          const double px = json_data_get(j, "x");
+          const double py = json_data_get(j, "y");
+          const double psi = json_data_get(j, "psi");
+          const double steering_angle = json_data_get(j, "steering_angle");
+          const double throttle = json_data_get(j, "throttle");
+          // Hah, convert mph to m/sec. Stop using mph :)
+          const double vel = json_data_get(j, "speed") * 0.44704;
+
+          const double sin_psi = std::sin(-psi);
+          const double cos_psi = std::cos(-psi);
+
+          const int wlen = wx.size();
+          Eigen::VectorXd x_veh(wlen);
+          Eigen::VectorXd y_veh(wlen);
+          std::vector<double> next_x(wlen);
+          std::vector<double> next_y(wlen);
+          for (int i = 0; i < wlen; i++) {
+            const double dx = wx[i] - px;
+            const double dy = wy[i] - py;
+            x_veh[i] = dx * cos_psi - dy * sin_psi;
+            y_veh[i] = dy * cos_psi + dx * sin_psi;
+            next_x[i] = x_veh[i];
+            next_y[i] = y_veh[i];
+          }
+
+          Eigen::VectorXd coeffs = polyfit(x_veh, y_veh, 3);
+
+          const double px_act = vel * mpc::dt;
+          const double py_act = 0;
+          const double cte = coeffs[0];
+          const double epsi = -std::atan(coeffs[1]);
+
+          const double psi_act = -vel * steering_angle * mpc::dt / mpc::lf;
+          const double v_act = vel + throttle * mpc::dt;
+          const double cte_act = cte + vel * std::sin(epsi) * mpc::dt;
+          const double epsi_act = epsi + psi_act;
+
+          Eigen::VectorXd state(static_cast<int>(mpc::kStateSize));
+
+          state << px_act, py_act, psi_act, v_act, cte_act, epsi_act;
+
+          controller.Solve(state, coeffs);
 
           const double throttle_value = controller.State()[mpc::kStateAcc];
           const double steer_value =
@@ -101,39 +145,15 @@ int main() {
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
-          // Display the MPC predicted trajectory
-          std::vector<double> mpc_x_vals;
-          std::vector<double> mpc_y_vals;
+          msgJson["next_x"] = next_x;
+          msgJson["next_y"] = next_y;
 
-          //.. add (x,y) points to list here, points are in reference to the
-          // vehicle's coordinate system
-          // the points in the simulator are connected by a Green line
-
-          msgJson["mpc_x"] = mpc_x_vals;
-          msgJson["mpc_y"] = mpc_y_vals;
-
-          // Display the waypoints/reference line
-          std::vector<double> next_x_vals;
-          std::vector<double> next_y_vals;
-
-          //.. add (x,y) points to list here, points are in reference to the
-          // vehicle's coordinate system
-          // the points in the simulator are connected by a Yellow line
-
-          msgJson["next_x"] = next_x_vals;
-          msgJson["next_y"] = next_y_vals;
+          msgJson["mpc_x"] = controller.XCoord();
+          msgJson["mpc_y"] = controller.YCoord();
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
-          // Latency
-          // The purpose is to mimic real driving conditions where
-          // the car does actuate the commands instantly.
-          //
-          // Feel free to play around with this value but should be to drive
-          // around the track with 100ms latency.
-          //
-          // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
-          // SUBMITTING.
+
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
