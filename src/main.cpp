@@ -100,8 +100,8 @@ int main() {
           const double py = json_data_get(j, "y");
           const double psi = json_data_get(j, "psi");
           const double vel = json_data_get(j, "speed");
-          double throttle = json_data_get(j, "throttle");
-          double steer = json_data_get(j, "steering_angle");
+          const double throttle = json_data_get(j, "throttle");
+          const double steer = json_data_get(j, "steering_angle");
 
           const double sin_psi = std::sin(-psi);
           const double cos_psi = std::cos(-psi);
