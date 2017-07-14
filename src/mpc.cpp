@@ -1,6 +1,6 @@
 /*
  * Created on Jul 11, 2017
- * Authour: Artem Artemev, @artemav
+ * Author: Artem Artemev, @artemav
  */
 
 #include "mpc.h"
@@ -15,48 +15,51 @@ static constexpr double vel_ref = 100.0;
 static constexpr double cte_ref = 0.0;
 static constexpr double epsi_ref = 0.0;
 
-static constexpr double var_bound = 1e10;
-static constexpr double delta_bound = 0.8;
+static constexpr double var_bound = 1e9;
+static constexpr double delta_bound = 0.8; // forces to shrink wide steering angles
 static constexpr double acc_bound = 1.0;
 
-//*
-static constexpr double cte_weight = 1500.0;
-static constexpr double epsi_weight = 1500.0;
+static constexpr double cte_weight = 1700.0; // minimizes distance from path lane
+static constexpr double epsi_weight = 1700.0;
 static constexpr double vel_weight = 1.0;
-static constexpr double delta_weight = 10;
-static constexpr double acc_weight = 10;
-static constexpr double diff_delta_weight = 150;
-static constexpr double diff_acc_weight = 15;
-// */
+static constexpr double delta_weight = 30; // causes turn slowly and more stable
+static constexpr double acc_weight = 35; // causes slow accelaration if value is big
+static constexpr double diff_delta_weight = 150; // affects reaction on turns
+static constexpr double diff_acc_weight = 15; // affects turns drastically
 
-class FG_eval {
+class CostEval {
 public:
   using ADvector = CPPAD_TESTVECTOR(AD<double>);
 
-  FG_eval(Eigen::VectorXd coeffs) : coeffs_(coeffs) {}
+  CostEval(const Eigen::VectorXd &coeffs) : coeffs_(coeffs) {}
 
   void operator()(ADvector &fg, const ADvector &vars) {
     fg[0] = 0;
 
     // Reference state minimization
+
     for (std::size_t i = 0; i < num_pred; ++i) {
-      fg[0] += cte_weight * CppAD::pow(vars[kVarCte + i] - cte_ref, 2.0) +
-               vel_weight * CppAD::pow(vars[kVarVel + i] - vel_ref, 2.0) +
-               epsi_weight * CppAD::pow(vars[kVarEpsi + i] - epsi_ref, 2.0);
+      const auto vel = vars[kVarVel + i] - vel_ref;
+      const auto cte = vars[kVarCte + i] - cte_ref;
+      const auto epsi = vars[kVarEpsi + i] - epsi_ref;
+
+      fg[0] += cte_weight * CppAD::pow(cte, 2);
+      fg[0] += vel_weight * CppAD::pow(vel, 2);
+      fg[0] += epsi_weight * CppAD::pow(epsi, 2);
     }
 
     // Actuators minimization
     for (std::size_t i = 0; i < num_pred - 1; ++i) {
-      fg[0] += delta_weight * CppAD::pow(vars[kVarDelta + i], 2.0) +
-               acc_weight * CppAD::pow(vars[kVarAcc + i], 2.0);
+      fg[0] += delta_weight * CppAD::pow(vars[kVarDelta + i], 2);
+      fg[0] += acc_weight * CppAD::pow(vars[kVarAcc + i], 2);
     }
 
     // Gap minimization between sequential actuations
     for (std::size_t i = 0; i < num_pred - 2; ++i) {
       auto delta = vars[kVarDelta + i + 1] - vars[kVarDelta + i];
-      auto acc = vars[kVarDelta + i + 1] - vars[kVarDelta + i];
-      fg[0] += diff_delta_weight * CppAD::pow(delta, 2) +
-               diff_acc_weight * CppAD::pow(acc, 2);
+      auto acc = vars[kVarAcc + i + 1] - vars[kVarAcc + i];
+      fg[0] += diff_delta_weight * CppAD::pow(delta, 2);
+      fg[0] += diff_acc_weight * CppAD::pow(acc, 2);
     }
 
     fg[kVarX + 1] = vars[kVarX];
@@ -75,8 +78,8 @@ public:
       const auto cte0 = vars[kVarCte + i];
       const auto epsi0 = vars[kVarEpsi + i];
       // Only consider the actuation at time t.
-      const auto k = i;
-      // const auto k = i > 0 ? i - 1 : i;
+
+      const auto k = i > 0 ? i - 1 : i;
       const auto delta0 = vars[kVarDelta + k];
       const auto acc0 = vars[kVarAcc + k];
 
@@ -87,23 +90,23 @@ public:
       const auto psi1 = vars[kVarPsi + j];
       const auto vel1 = vars[kVarVel + j];
       const auto cte1 = vars[kVarCte + j];
-      const auto epsi1 = vars[kVarPsi + j];
+      const auto epsi1 = vars[kVarEpsi + j];
 
-      const auto f_ref = coeffs_[3] * CppAD::pow(x0, 3) +
+      const auto f_aim = coeffs_[3] * CppAD::pow(x0, 3) +
                          coeffs_[2] * CppAD::pow(x0, 2) +
                          coeffs_[1] * x0 +
                          coeffs_[0];
 
-      const auto psi_ref = CppAD::atan(coeffs_[3] * CppAD::pow(x0, 2) * 3.0 +
+      const auto psi_aim = CppAD::atan(coeffs_[3] * CppAD::pow(x0, 2) * 3.0 +
                                        coeffs_[2] * x0 * 2.0 +
                                        coeffs_[1]);
 
       const auto x_dest = x0 + vel0 * CppAD::cos(psi0) * dt;
       const auto y_dest = y0 + vel0 * CppAD::sin(psi0) * dt;
-      const auto psi_dest = psi0 - vel0 * delta0 / lf * dt;
+      const auto psi_dest = psi0 + vel0 * (-delta0) / lf * dt;
       const auto vel_dest = vel0 + acc0 * dt;
-      const auto cte_dest = f_ref - y0 + vel0 * CppAD::sin(epsi0) * dt;
-      const auto epsi_dest = psi0 - psi_ref - vel0 * delta0 / lf * dt;
+      const auto cte_dest = f_aim - y0 + vel0 * CppAD::sin(epsi0) * dt;
+      const auto epsi_dest = psi0 - psi_aim + vel0 * (-delta0) / lf * dt;
 
       const auto l = i + 2;
       fg[kVarX + l] = x1 - x_dest;
@@ -124,7 +127,6 @@ private:
 // MPC class definition implementation.
 //
 MPC::MPC() {
-
   x_coord_ = std::vector<double>(num_pred);
   y_coord_ = std::vector<double>(num_pred);
 
@@ -162,7 +164,7 @@ MPC::MPC() {
 MPC::~MPC() {}
 
 void MPC::Solve(double x, double y, double psi, double vel, double cte,
-                double epsi, Eigen::VectorXd coeffs) {
+                double epsi, const Eigen::VectorXd &coeffs) {
   vars_[kVarX] = x;
   vars_[kVarY] = y;
   vars_[kVarPsi] = psi;
@@ -184,17 +186,17 @@ void MPC::Solve(double x, double y, double psi, double vel, double cte,
   constraints_low_[kVarCte] = cte;
   constraints_low_[kVarEpsi] = epsi;
 
-  std::string options;
+  std::string options ;
   options += "Integer print_level  0\n";
   options += "Sparse  true        forward\n";
   options += "Sparse  true        reverse\n";
   options += "Numeric max_cpu_time          0.5\n";
 
   // object that computes objective and constraints
-  FG_eval mcp_eval(coeffs);
+  CostEval mcp_eval(coeffs);
 
   CppAD::ipopt::solve_result<Dvector> solution;
-  CppAD::ipopt::solve<Dvector, FG_eval>(options, vars_, vars_low_, vars_up_,
+  CppAD::ipopt::solve<Dvector, CostEval>(options, vars_, vars_low_, vars_up_,
                                         constraints_low_, constraints_up_,
                                         mcp_eval, solution);
 
@@ -209,13 +211,9 @@ void MPC::Solve(double x, double y, double psi, double vel, double cte,
   steer_ = solution.x[kVarDelta];
   throttle_ = solution.x[kVarAcc];
 
-  AUX_DEBUG("Acc =", steer_);
-  AUX_DEBUG("Delta =", throttle_);
-
   for (std::size_t i = 0; i < num_pred; ++i) {
     x_coord_[i] = solution.x[kVarX + i];
     y_coord_[i] = solution.x[kVarY + i];
-    AUX_DEBUG("x =", solution.x[kVarX + i], ", y =", solution.x[kVarY + i]);
   }
 }
 

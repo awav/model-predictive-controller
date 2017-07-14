@@ -22,7 +22,7 @@ double rad2deg(double x) { return x * 180 / pi(); }
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
 // else the empty string "" will be returned.
-std::string hasData(std::string s) {
+std::string hasData(const std::string &s) {
   auto found_null = s.find("null");
   auto b1 = s.find_first_of("[");
   auto b2 = s.rfind("}]");
@@ -46,8 +46,8 @@ double polyeval(const Eigen::VectorXd &coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
+Eigen::VectorXd polyfit(const Eigen::VectorXd &xvals,
+                        const Eigen::VectorXd &yvals, int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -84,17 +84,17 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     std::string sdata = std::string(data).substr(0, length);
-    std::cout << sdata << std::endl;
+
+    AUX_DEBUG(sdata);
+
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       std::string s = hasData(sdata);
       if (s != "") {
         auto j = json::parse(s);
         std::string event = j[0].get<std::string>();
         if (event == "telemetry") {
-          std::vector<double> x_pts =
-              json_data_get<std::vector<double>>(j, "ptsx");
-          std::vector<double> y_pts =
-              json_data_get<std::vector<double>>(j, "ptsy");
+          auto x_pts = json_data_get<std::vector<double>>(j, "ptsx");
+          auto y_pts = json_data_get<std::vector<double>>(j, "ptsy");
           assert(x_pts.size() == y_pts.size());
           const double px = json_data_get(j, "x");
           const double py = json_data_get(j, "y");
@@ -121,10 +121,9 @@ int main() {
           std::vector<double> next_x(mpc::num_pred);
           std::vector<double> next_y(mpc::num_pred);
           for (int i = 0; i < (int)mpc::num_pred; ++i) {
-            const double dx = 5 * i;
-            const double dy = coeffs[3] * std::pow(dx, 3) +
-                              coeffs[2] * std::pow(dx, 2) + coeffs[1] * dx +
-                              coeffs[0];
+            const double dx = 10 * i;
+            const double dy = coeffs[3] * dx * dx * dx + coeffs[2] * dx * dx +
+                              coeffs[1] * dx + coeffs[0];
             next_x[i] = dx;
             next_y[i] = dy;
           }
@@ -132,37 +131,28 @@ int main() {
           const double cte = coeffs[0];
           const double epsi = -std::atan(coeffs[1]);
 
-          const double cur_x = vel * mpc::dt;
-          const double cur_y = 0;
-          const double cur_psi = -vel * steer / mpc::lf * mpc::dt ;
+          const double cur_x = 0.0 + vel * mpc::dt;
+          const double cur_y = 0.0;
+          const double cur_psi = 0.0 + vel * (-steer) / mpc::lf * mpc::dt;
           const double cur_vel = vel + throttle * mpc::dt;
           const double cur_cte = cte + vel * std::sin(epsi) * mpc::dt;
-          const double cur_epsi = epsi - vel * steer / mpc::lf * mpc::dt;
+          const double cur_epsi = epsi + vel * (-steer) / mpc::lf * mpc::dt;
 
           controller.Solve(cur_x, cur_y, cur_psi, cur_vel, cur_cte, cur_epsi,
                            coeffs);
 
-          steer = controller.Steer();
-          throttle = controller.Throttle();
-          // const double steer_value = - controller.Steer() / mpc::rad25;
-
           json msgJson;
-          msgJson["steering_angle"] = steer;
-          msgJson["throttle"] = throttle;
+          msgJson["steering_angle"] = controller.Steer();
+          msgJson["throttle"] = controller.Throttle();
 
-          std::vector<double> x_future(controller.XCoord());
-          std::vector<double> y_future(controller.YCoord());
-          msgJson["mpc_x"] = x_future;
-          msgJson["mpc_y"] = y_future;
-
-          //msgJson["mpc_x"] = controller.XCoord();
-          //msgJson["mpc_y"] = controller.YCoord();
+          msgJson["mpc_x"] = controller.XCoord();
+          msgJson["mpc_y"] = controller.YCoord();
 
           msgJson["next_x"] = next_x;
           msgJson["next_y"] = next_y;
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          AUX_DEBUG(msg);
 
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);

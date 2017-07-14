@@ -27,7 +27,7 @@ public:
   // Solve the model given an initial state and polynomial coefficients.
   // Return the first actuatotions.
   void Solve(double x, double y, double psi, double vel, double cte,
-             double epsi, Eigen::VectorXd coeffs);
+             double epsi, const Eigen::VectorXd &coeffs);
 
   const std::vector<double> &XCoord() const;
   const std::vector<double> &YCoord() const;
