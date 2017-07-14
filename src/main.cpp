@@ -1,8 +1,8 @@
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
+#include "aux.h"
 #include "json.hpp"
 #include "mpc.h"
-#include "aux.h"
 
 #include <chrono>
 #include <iostream>
@@ -46,8 +46,8 @@ double polyeval(const Eigen::VectorXd &coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(const Eigen::VectorXd xvals,
-                        const Eigen::VectorXd &yvals, int order) {
+Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
+                        int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -67,8 +67,8 @@ Eigen::VectorXd polyfit(const Eigen::VectorXd xvals,
   return result;
 }
 
-template <typename Out = double, typename Json = json::basic_json>
-Out json_data_get(const Json &j, const std::string &key) {
+template <typename Value = double>
+Value json_data_get(const json &j, const std::string &key) {
   return j[1][key];
 }
 
@@ -91,65 +91,75 @@ int main() {
         auto j = json::parse(s);
         std::string event = j[0].get<std::string>();
         if (event == "telemetry") {
-          const auto &wx = json_data_get<std::vector<double>>(j, "ptsx");
-          const auto &wy = json_data_get<std::vector<double>>(j, "ptsy");
-          assert(wx.size() == wy.size());
+          std::vector<double> x_pts =
+              json_data_get<std::vector<double>>(j, "ptsx");
+          std::vector<double> y_pts =
+              json_data_get<std::vector<double>>(j, "ptsy");
+          assert(x_pts.size() == y_pts.size());
           const double px = json_data_get(j, "x");
           const double py = json_data_get(j, "y");
           const double psi = json_data_get(j, "psi");
-          const double steering_angle = json_data_get(j, "steering_angle");
-          const double throttle = json_data_get(j, "throttle");
-          // Hah, convert mph to m/sec. Stop using mph :)
-          const double vel = json_data_get(j, "speed") * 0.44704;
+          const double vel = json_data_get(j, "speed");
+          double throttle = json_data_get(j, "throttle");
+          double steer = json_data_get(j, "steering_angle");
 
           const double sin_psi = std::sin(-psi);
           const double cos_psi = std::cos(-psi);
 
-          const int wlen = wx.size();
-          Eigen::VectorXd x_veh(wlen);
-          Eigen::VectorXd y_veh(wlen);
-          std::vector<double> next_x(wlen);
-          std::vector<double> next_y(wlen);
+          const int wlen = x_pts.size();
+          Eigen::VectorXd wx_pts(wlen);
+          Eigen::VectorXd wy_pts(wlen);
           for (int i = 0; i < wlen; i++) {
-            const double dx = wx[i] - px;
-            const double dy = wy[i] - py;
-            x_veh[i] = dx * cos_psi - dy * sin_psi;
-            y_veh[i] = dy * cos_psi + dx * sin_psi;
-            next_x[i] = x_veh[i];
-            next_y[i] = y_veh[i];
+            const double dx = x_pts[i] - px;
+            const double dy = y_pts[i] - py;
+            wx_pts[i] = dx * cos_psi - dy * sin_psi;
+            wy_pts[i] = dy * cos_psi + dx * sin_psi;
           }
 
-          Eigen::VectorXd coeffs = polyfit(x_veh, y_veh, 3);
+          Eigen::VectorXd coeffs = polyfit(wx_pts, wy_pts, 3);
 
-          const double px_act = vel * mpc::dt;
-          const double py_act = 0;
+          std::vector<double> next_x(mpc::num_pred);
+          std::vector<double> next_y(mpc::num_pred);
+          for (int i = 0; i < (int)mpc::num_pred; ++i) {
+            const double dx = 5 * i;
+            const double dy = coeffs[3] * std::pow(dx, 3) +
+                              coeffs[2] * std::pow(dx, 2) + coeffs[1] * dx +
+                              coeffs[0];
+            next_x[i] = dx;
+            next_y[i] = dy;
+          }
+
           const double cte = coeffs[0];
           const double epsi = -std::atan(coeffs[1]);
 
-          const double psi_act = -vel * steering_angle * mpc::dt / mpc::lf;
-          const double v_act = vel + throttle * mpc::dt;
-          const double cte_act = cte + vel * std::sin(epsi) * mpc::dt;
-          const double epsi_act = epsi + psi_act;
+          const double cur_x = vel * mpc::dt;
+          const double cur_y = 0;
+          const double cur_psi = -vel * steer / mpc::lf * mpc::dt ;
+          const double cur_vel = vel + throttle * mpc::dt;
+          const double cur_cte = cte + vel * std::sin(epsi) * mpc::dt;
+          const double cur_epsi = epsi - vel * steer / mpc::lf * mpc::dt;
 
-          Eigen::VectorXd state(static_cast<int>(mpc::kStateSize));
+          controller.Solve(cur_x, cur_y, cur_psi, cur_vel, cur_cte, cur_epsi,
+                           coeffs);
 
-          state << px_act, py_act, psi_act, v_act, cte_act, epsi_act;
-
-          controller.Solve(state, coeffs);
-
-          const double throttle_value = controller.State()[mpc::kStateAcc];
-          const double steer_value =
-              -controller.State()[mpc::kStateDelta] / mpc::rad25;
+          steer = controller.Steer();
+          throttle = controller.Throttle();
+          // const double steer_value = - controller.Steer() / mpc::rad25;
 
           json msgJson;
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = throttle_value;
+          msgJson["steering_angle"] = steer;
+          msgJson["throttle"] = throttle;
+
+          std::vector<double> x_future(controller.XCoord());
+          std::vector<double> y_future(controller.YCoord());
+          msgJson["mpc_x"] = x_future;
+          msgJson["mpc_y"] = y_future;
+
+          //msgJson["mpc_x"] = controller.XCoord();
+          //msgJson["mpc_y"] = controller.YCoord();
 
           msgJson["next_x"] = next_x;
           msgJson["next_y"] = next_y;
-
-          msgJson["mpc_x"] = controller.XCoord();
-          msgJson["mpc_y"] = controller.YCoord();
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
