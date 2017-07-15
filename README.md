@@ -38,6 +38,8 @@ The algorithm itself nails down to following steps executed in `dt`:
 
 The process of tuning parameters, setting their constrains and boundaries is most tedious and annoying part. For example, the car can't physically turn on 90°, thereafter MPC optimizer had to be guided to bound its output for steering angle. In this project I used `[-0.8, 0.8]` range. This is not only parameter which you have to handcraft. Most difficult ones are weights in objective function and you need to be conscious of what type of weights you modify and why. If you look at out with the tail of eye at `mpc.cpp` source file, you can find list of static variables with `_weight` suffix. I tuned all of them with bare hands. I played with these values a bit and found consistent patterns, some of them I described by comments in source file. Please, double-o this file and weights if you are interested with what values I ended up for _"safe"_ and _"fast"_ driving style of _Udacity_ car in simulator.
 
+IDEA: It would be nice to tune handcrafted weights in objective function by ML defining good driving style.
+
 ### Build instructions
 
 Before you start make sure that you have all installed dependencies:
