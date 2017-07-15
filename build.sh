@@ -18,5 +18,5 @@ numproc=$([[ $(uname) == 'Darwin' ]] && sysctl -n hw.physicalcpu_max || nproc)
 # Compile code.
 mkdir -p build
 cd build
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j ${numproc} $*

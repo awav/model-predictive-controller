@@ -11,11 +11,11 @@ namespace mpc {
 
 using CppAD::AD;
 
-static constexpr double vel_ref = 100.0;
+static constexpr double vel_ref = 110.0;
 static constexpr double cte_ref = 0.0;
 static constexpr double epsi_ref = 0.0;
 
-static constexpr double var_bound = 1e9;
+static constexpr double var_bound = 1e3;
 static constexpr double delta_bound = 0.8; // forces to shrink wide steering angles
 static constexpr double acc_bound = 1.0;
 
@@ -24,8 +24,8 @@ static constexpr double epsi_weight = 1700.0;
 static constexpr double vel_weight = 1.0;
 static constexpr double delta_weight = 30; // causes turn slowly and more stable
 static constexpr double acc_weight = 35; // causes slow accelaration if value is big
-static constexpr double diff_delta_weight = 150; // affects reaction on turns
-static constexpr double diff_acc_weight = 15; // affects turns drastically
+static constexpr double diff_delta_weight = 145; // affects reaction on turns
+static constexpr double diff_acc_weight = 14; // affects turns drastically
 
 class CostEval {
 public:
