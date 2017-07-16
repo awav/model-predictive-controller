@@ -131,12 +131,12 @@ int main() {
           const double cte = coeffs[0];
           const double epsi = -std::atan(coeffs[1]);
 
-          const double cur_x = 0.0 + vel * mpc::dt;
+          const double cur_x = vel * mpc::dt;
           const double cur_y = 0.0;
-          const double cur_psi = 0.0 + vel * (-steer) / mpc::lf * mpc::dt;
+          const double cur_psi = -vel * steer / mpc::lf * mpc::dt;
           const double cur_vel = vel + throttle * mpc::dt;
           const double cur_cte = cte + vel * std::sin(epsi) * mpc::dt;
-          const double cur_epsi = epsi + vel * (-steer) / mpc::lf * mpc::dt;
+          const double cur_epsi = epsi - vel * steer / mpc::lf * mpc::dt;
 
           controller.Solve(cur_x, cur_y, cur_psi, cur_vel, cur_cte, cur_epsi,
                            coeffs);

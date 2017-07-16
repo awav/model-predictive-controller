@@ -11,7 +11,7 @@ namespace mpc {
 
 using CppAD::AD;
 
-static constexpr double vel_ref = 110.0;
+static constexpr double vel_ref = 80.0;
 static constexpr double cte_ref = 0.0;
 static constexpr double epsi_ref = 0.0;
 
