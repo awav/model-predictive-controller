@@ -24,7 +24,7 @@ static constexpr double epsi_weight = 1700.0;
 static constexpr double vel_weight = 1.0;
 static constexpr double delta_weight = 30; // causes turn slowly and more stable
 static constexpr double acc_weight = 35; // causes slow accelaration if value is big
-static constexpr double diff_delta_weight = 145; // affects reaction on turns
+static constexpr double diff_delta_weight = 400; // affects reaction on turns
 static constexpr double diff_acc_weight = 14; // affects turns drastically
 
 class CostEval {
